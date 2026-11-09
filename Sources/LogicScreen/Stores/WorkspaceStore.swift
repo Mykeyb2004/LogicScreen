@@ -22,6 +22,7 @@ final class WorkspaceStore {
     var inventoryError: String?
     var plan: DisplayChangePlan?
     var isPreparing = false
+    let signingInfo = AppSigningInfo.current()
 
     @ObservationIgnored let displayService = DisplayService()
     @ObservationIgnored let windowService = WindowService()
@@ -31,6 +32,8 @@ final class WorkspaceStore {
     @ObservationIgnored let countdown = ConfirmationTimer()
     @ObservationIgnored private var polling: Task<Void, Never>?
     @ObservationIgnored private var screenObserver: NSObjectProtocol?
+    @ObservationIgnored private var activationObserver: NSObjectProtocol?
+    @ObservationIgnored private var lastLoggedTrust: Bool?
     @ObservationIgnored var focusedDisplayID: String?
     @ObservationIgnored var restoreRequested = false
     @ObservationIgnored let logger = Logger(subsystem: "dev.logicscreen.app", category: "Workspace")
@@ -51,6 +54,9 @@ final class WorkspaceStore {
         screenObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main
         ) { [weak self] _ in Task { @MainActor in self?.screenConfigurationChanged() } }
+        activationObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
+        ) { [weak self] _ in Task { @MainActor in await self?.recheckPermission(announce: false) } }
         polling = Task { [weak self] in
             var tick = 0
             await self?.reloadWindows()
@@ -70,6 +76,10 @@ final class WorkspaceStore {
         let current = displayService.displays()
         if displays != current { displays = current }
         isTrusted = AXIsProcessTrusted()
+        if lastLoggedTrust != isTrusted {
+            lastLoggedTrust = isTrusted
+            logger.info("Accessibility trusted=\(self.isTrusted), adHoc=\(self.signingInfo.isAdHoc ?? false), codeHash=\(self.signingInfo.codeHash ?? "unknown", privacy: .public)")
+        }
         if !isTrusted { inventory = nil }
         if selectedID == nil || !displays.contains(where: { $0.id == selectedID }) {
             selectedID = displays.first(where: \.isActive)?.id
@@ -119,9 +129,24 @@ final class WorkspaceStore {
     func requestPermission() {
         let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
         isTrusted = AXIsProcessTrustedWithOptions(options)
-        if !isTrusted {
-            NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
+        if !isTrusted { openAccessibilitySettings() }
+    }
+
+    func openAccessibilitySettings() {
+        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
+    }
+
+    func revealCurrentApplication() {
+        NSWorkspace.shared.activateFileViewerSelecting([Bundle.main.bundleURL])
+    }
+
+    func recheckPermission(announce: Bool = true) async {
+        refresh()
+        if announce {
+            statusIsError = !isTrusted
+            status = isTrusted ? "辅助功能权限已生效，可以预览和迁移窗口。" : "系统仍未允许当前版本管理窗口。如果开关已经开启，请查看“已开启仍无效？”。"
         }
+        if isTrusted { await reloadWindows() }
     }
 
     var applicationPIDs: [pid_t] {

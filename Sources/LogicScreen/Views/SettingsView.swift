@@ -4,6 +4,7 @@ struct SettingsView: View {
     let store: WorkspaceStore
     @AppStorage("appearance") private var appearance = "system"
     @AppStorage("confirmationDuration") private var confirmationDuration = 15
+    @State private var showingPermissionHelp = false
 
     var body: some View {
         Form {
@@ -33,6 +34,12 @@ struct SettingsView: View {
                 }
                 Text("窗口预览只统计应用与数量，不读取窗口标题，也不截取屏幕内容。")
                     .font(.callout).foregroundStyle(.secondary)
+                if !store.isTrusted {
+                    HStack {
+                        Button("重新检测") { Task { await store.recheckPermission() } }
+                        Button("已开启仍无效？") { showingPermissionHelp = true }.buttonStyle(.link)
+                    }
+                }
             }
             Section {
                 HStack(spacing: 12) {
@@ -48,5 +55,6 @@ struct SettingsView: View {
         }
         .formStyle(.grouped).frame(width: 490, height: 535)
         .preferredColorScheme(appearance == "system" ? nil : appearance == "dark" ? .dark : .light)
+        .sheet(isPresented: $showingPermissionHelp) { PermissionHelpView(store: store) }
     }
 }

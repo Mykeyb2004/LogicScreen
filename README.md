@@ -12,7 +12,17 @@
 
 也可以使用 Codex 的 **Run** 按钮。脚本构建 SwiftPM 工程，在 `dist/LogicScreen.app` 生成本地开发应用并启动。
 
-首次运行，点击 **前往授权**，在「系统设置 → 隐私与安全性 → 辅助功能」中开启 LogicScreen。应用会自动更新权限状态。开发版本采用 ad hoc 签名，重新编译后 macOS 可能要求重新授权；正式分发需要稳定的开发者签名和公证。
+首次运行，点击 **打开辅助功能**，在「系统设置 → 隐私与安全性 → 辅助功能」中开启 LogicScreen。应用会自动更新权限状态。开发版本采用 ad hoc 签名，重新编译后 macOS 可能要求重新授权；正式分发需要稳定的开发者签名和公证。
+
+如果系统开关已开启，应用仍提示未授权，请先点击「重新检测」。更新过的临时签名开发包可能与旧授权不匹配：在辅助功能列表中移除旧 LogicScreen 条目，重新添加当前 `dist/LogicScreen.app` 并开启；回到应用检测，必要时重启。点击「已开启仍无效？」可查看步骤和定位当前应用。
+
+有可用代码签名证书时，可指定同一个身份构建，避免开发更新时授权随代码指纹失效：
+
+```sh
+LOGICSCREEN_SIGNING_IDENTITY='Apple Development: Your Name (TEAMID)' ./script/build_and_run.sh
+```
+
+脚本不会创建证书或修改钥匙串。证书是否可用可通过 `security find-identity -v -p codesigning` 检查。
 
 ## 操作
 

@@ -2,20 +2,26 @@ import SwiftUI
 
 struct PermissionBanner: View {
     let store: WorkspaceStore
+    @State private var showingHelp = false
 
     var body: some View {
-        HStack(alignment: .center, spacing: 14) {
+        HStack(alignment: .top, spacing: 14) {
             Image(systemName: "hand.raised.square.fill").font(.system(size: 30)).foregroundStyle(.tint)
             VStack(alignment: .leading, spacing: 5) {
-                Text("开启窗口管理，从这里开始").font(.headline)
-                Text("在辅助功能中允许 LogicScreen，即可预览和迁移其他应用的窗口。")
+                Text("当前版本尚未获得窗口管理权限").font(.headline)
+                Text("已开启系统开关？请重新检测；应用更新后，旧授权可能需要重新添加。")
                     .font(.callout).foregroundStyle(.secondary)
+                HStack(spacing: 12) {
+                    Button("打开辅助功能", systemImage: "arrow.up.right") { store.requestPermission() }
+                        .buttonStyle(.borderedProminent)
+                    Button("重新检测", systemImage: "arrow.clockwise") { Task { await store.recheckPermission() } }
+                    Button("已开启仍无效？") { showingHelp = true }.buttonStyle(.link)
+                }.padding(.top, 7)
             }
             Spacer(minLength: 0)
-            Button("前往授权", systemImage: "arrow.up.right") { store.requestPermission() }
-                .buttonStyle(.borderedProminent)
         }
         .workspaceCard()
+        .sheet(isPresented: $showingHelp) { PermissionHelpView(store: store) }
     }
 }
 

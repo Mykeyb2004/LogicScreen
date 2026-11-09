@@ -7,6 +7,7 @@ BUNDLE_ID="dev.logicscreen.app"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_BUNDLE="$ROOT_DIR/dist/$APP_NAME.app"
 APP_MACOS="$APP_BUNDLE/Contents/MacOS"
+SIGNING_IDENTITY="${LOGICSCREEN_SIGNING_IDENTITY:--}"
 cd "$ROOT_DIR"
 
 case "$MODE" in
@@ -45,7 +46,12 @@ cat > "$APP_BUNDLE/Contents/Info.plist" <<PLIST
   <key>NSHighResolutionCapable</key><true/>
 </dict></plist>
 PLIST
-/usr/bin/codesign --force --sign - --identifier "$BUNDLE_ID" "$APP_BUNDLE"
+/usr/bin/codesign --force --sign "$SIGNING_IDENTITY" --identifier "$BUNDLE_ID" "$APP_BUNDLE"
+/usr/bin/codesign --verify --strict "$APP_BUNDLE"
+if [[ "$SIGNING_IDENTITY" == "-" ]]; then
+  echo "Development ad hoc signature: rebuilding changes the identity used by Accessibility."
+  echo "Set LOGICSCREEN_SIGNING_IDENTITY to a stable code-signing certificate to retain authorization across builds."
+fi
 
 case "$MODE" in
   --build-only) echo "Built $APP_BUNDLE" ;;
