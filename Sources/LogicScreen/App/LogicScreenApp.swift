@@ -6,19 +6,18 @@ import OSLog
 struct LogicScreenApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @State private var store = WorkspaceStore()
+    @AppStorage("appearance") private var appearance = "system"
 
     var body: some Scene {
-        WindowGroup("LogicScreen", id: "workspace") {
-            ContentView(store: store)
-                .task { store.start() }
-        }
-        .defaultSize(width: 900, height: 640)
+        Window("LogicScreen", id: "workspace") { workspaceContent }
+        .defaultSize(width: 1040, height: 820)
         .windowResizability(.contentMinSize)
         .commands {
+            CommandGroup(replacing: .newItem) { }
             CommandGroup(after: .toolbar) {
                 Button("收拢窗口到所选屏幕") { Task { await store.gather() } }
                     .keyboardShortcut("g", modifiers: [.command, .shift])
-                    .disabled(!store.isTrusted || store.isBusy || store.selected?.isActive != true)
+                    .disabled(!store.isTrusted || store.controlsLocked || store.selected?.isActive != true || store.activeCount < 2)
                 Button("恢复布局") { Task { await store.restore() } }
                     .keyboardShortcut("r", modifiers: [.command, .option, .control])
                     .disabled(!store.canRestore || store.isBusy)
@@ -26,14 +25,48 @@ struct LogicScreenApp: App {
         }
 
         MenuBarExtra("LogicScreen", systemImage: "display.2") {
-            MenuContent(store: store)
+            MenuBarPanel(store: store)
+                .preferredColorScheme(appearance == "system" ? nil : appearance == "dark" ? .dark : .light)
         }
+        .menuBarExtraStyle(.window)
+
+        Settings { SettingsView(store: store) }
+    }
+
+    private var workspaceContent: some View {
+        ContentView(store: store)
+            .preferredColorScheme(appearance == "system" ? nil : appearance == "dark" ? .dark : .light)
+            .onAppear { delegate.store = store }
+            .task { store.start() }
     }
 }
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var fixtureWindow: NSWindow?
+    weak var store: WorkspaceStore?
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard let store else { return .terminateNow }
+        guard !store.isBusy else {
+            NSApp.activate(ignoringOtherApps: true)
+            return .terminateCancel
+        }
+        guard store.canRestore else { return .terminateNow }
+        Task { @MainActor in
+            await store.restore()
+            if store.canRestore {
+                let alert = NSAlert()
+                alert.messageText = "部分布局或窗口尚未恢复"
+                alert.informativeText = "可以返回工作台再次恢复；立即退出后，本次窗口位置记录将丢失。"
+                alert.addButton(withTitle: "返回工作台")
+                alert.addButton(withTitle: "仍然退出")
+                NSApp.activate(ignoringOtherApps: true)
+                NSApp.reply(toApplicationShouldTerminate: alert.runModal() == .alertSecondButtonReturn)
+            } else { NSApp.reply(toApplicationShouldTerminate: true) }
+        }
+        return .terminateLater
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
@@ -55,28 +88,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
-}
 
-private struct MenuContent: View {
-    let store: WorkspaceStore
-    @Environment(\.openWindow) private var openWindow
-
-    var body: some View {
-        Button("打开 LogicScreen") {
-            openWindow(id: "workspace")
-            NSApp.activate(ignoringOtherApps: true)
-        }
-        Divider()
-        ForEach(store.displays.filter(\.isActive)) { screen in
-            Button("收拢到 \(String(screen.name.prefix(16)))") {
-                store.selectedID = screen.id
-                Task { await store.gather() }
-            }
-            .disabled(store.isBusy || !store.isTrusted)
-        }
-        Divider()
-        Button("恢复布局  ⌃⌥⌘R") { Task { await store.restore() } }
-            .disabled(!store.canRestore || store.isBusy)
-        Button("退出 LogicScreen") { NSApp.terminate(nil) }.keyboardShortcut("q")
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        guard let window = WorkspaceWindow.existing() else { return true }
+        if window.isMiniaturized { window.deminiaturize(nil) }
+        window.makeKeyAndOrderFront(nil)
+        return false
     }
 }

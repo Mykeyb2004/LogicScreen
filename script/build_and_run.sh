@@ -19,6 +19,12 @@ export CLANG_MODULE_CACHE_PATH="$ROOT_DIR/.build/ModuleCache"
 swift build --disable-sandbox --cache-path "$ROOT_DIR/.build/cache" --config-path "$ROOT_DIR/.build/config" --security-path "$ROOT_DIR/.build/security"
 BUILD_DIR="$(swift build --show-bin-path --cache-path "$ROOT_DIR/.build/cache" --config-path "$ROOT_DIR/.build/config" --security-path "$ROOT_DIR/.build/security")"
 mkdir -p "$APP_MACOS"
+mkdir -p "$APP_BUNDLE/Contents/Resources"
+if [[ ! -f "$ROOT_DIR/.build/AppIcon.icns" || "$ROOT_DIR/script/generate_icon.swift" -nt "$ROOT_DIR/.build/AppIcon.icns" ]]; then
+  swift "$ROOT_DIR/script/generate_icon.swift" "$ROOT_DIR/.build/AppIcon.iconset"
+  /usr/bin/iconutil --convert icns "$ROOT_DIR/.build/AppIcon.iconset" --output "$ROOT_DIR/.build/AppIcon.icns"
+fi
+cp "$ROOT_DIR/.build/AppIcon.icns" "$APP_BUNDLE/Contents/Resources/AppIcon.icns"
 cp "$BUILD_DIR/$APP_NAME" "$APP_MACOS/$APP_NAME"
 chmod +x "$APP_MACOS/$APP_NAME"
 
@@ -31,8 +37,9 @@ cat > "$APP_BUNDLE/Contents/Info.plist" <<PLIST
   <key>CFBundleName</key><string>$APP_NAME</string>
   <key>CFBundleDisplayName</key><string>$APP_NAME</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>0.1.0</string>
-  <key>CFBundleVersion</key><string>1</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
+  <key>CFBundleShortVersionString</key><string>0.2.0</string>
+  <key>CFBundleVersion</key><string>2</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>NSPrincipalClass</key><string>NSApplication</string>
   <key>NSHighResolutionCapable</key><true/>

@@ -11,14 +11,42 @@ public actor WindowService {
         let displayIdentity: String?
     }
     private var saved: [SavedWindow] = []
+    private var lastMigrated: [AXUIElement] = []
     private let logger = Logger(subsystem: "dev.logicscreen.app", category: "Windows")
 
     public init() {}
+
+    public func inventory(displays: [DisplayRecord], pids: [pid_t]) throws -> WindowInventory {
+        guard AXIsProcessTrusted() else { throw ScreenOperationError.permissionRequired }
+        var result = WindowInventory()
+        for pid in pids {
+            let app = AXUIElementCreateApplication(pid)
+            AXUIElementSetMessagingTimeout(app, 0.4)
+            guard let windows = attribute(app, kAXWindowsAttribute) as? [AXUIElement] else {
+                result.unreadablePIDs.append(pid)
+                continue
+            }
+            for window in windows {
+                AXUIElementSetMessagingTimeout(window, 0.4)
+                guard attribute(window, kAXRoleAttribute) as? String == kAXWindowRole,
+                      let rect = frame(window), rect.width > 1, rect.height > 1,
+                      let display = WindowPlacement.owningDisplay(for: rect, displays: displays) else { continue }
+                let restriction: WindowRestriction?
+                if bool(window, kAXMinimizedAttribute) { restriction = .minimized }
+                else if bool(window, "AXFullScreen") { restriction = .fullScreen }
+                else if !settable(window, kAXPositionAttribute) { restriction = .fixed }
+                else { restriction = nil }
+                result.windows.append(WindowPreview(applicationPID: pid, displayID: display.id, restriction: restriction))
+            }
+        }
+        return result
+    }
 
     public func gather(to target: DisplayRecord, displays: [DisplayRecord], pids: [pid_t],
                        sourceIDs: Set<String>? = nil, strict: Bool = false) throws -> MigrationReport {
         guard AXIsProcessTrusted() else { throw ScreenOperationError.permissionRequired }
         var report = MigrationReport()
+        lastMigrated = []
         for pid in pids {
             let app = AXUIElementCreateApplication(pid)
             AXUIElementSetMessagingTimeout(app, 0.4)
@@ -53,10 +81,28 @@ public actor WindowService {
                    let actual = frame(window), actual.intersects(target.visibleFrame),
                    abs(actual.minX - desired.minX) < 12, abs(actual.minY - desired.minY) < 12 {
                     report.moved += 1
+                    lastMigrated.append(window)
                 } else { report.failed += 1 }
             }
         }
         logger.info("Window migration finished: moved=\(report.moved), failed=\(report.failed), skipped=\(report.skipped)")
+        return report
+    }
+
+    /// Correct only windows from the most recent migration after the desktop coordinate origin changes.
+    public func settleMigration(to target: DisplayRecord) -> MigrationReport {
+        var report = MigrationReport()
+        for window in lastMigrated {
+            guard let actual = frame(window) else { continue }
+            if target.visibleFrame.contains(actual) { continue }
+            let desired = WindowPlacement.movedFrame(actual, from: target.visibleFrame,
+                                                     to: target.visibleFrame, canResize: settable(window, kAXSizeAttribute))
+            if setFrame(window, desired, canResize: settable(window, kAXSizeAttribute)),
+               let settled = frame(window), settled.intersects(target.visibleFrame),
+               abs(settled.minX - desired.minX) < 12, abs(settled.minY - desired.minY) < 12 {
+                report.moved += 1
+            } else { report.failed += 1 }
+        }
         return report
     }
 

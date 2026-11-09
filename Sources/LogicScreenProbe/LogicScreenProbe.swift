@@ -25,12 +25,22 @@ struct LogicScreenProbe {
                 let encoder = JSONEncoder()
                 encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
                 print(String(decoding: try encoder.encode(report), as: UTF8.self))
+            case "--inventory":
+                let pids = NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular && !$0.isTerminated }
+                    .map(\.processIdentifier)
+                let inventory = try await WindowService().inventory(displays: screens, pids: pids)
+                print("Inventory: \(inventory.windows.count) windows, \(inventory.unreadablePIDs.count) unreadable applications.")
+                for screen in screens.filter(\.isActive) {
+                    let readiness = inventory.readiness(sourceIDs: [screen.id])
+                    print("\(screen.name): movable=\(readiness.movable), blocked=\(readiness.blocked)")
+                }
             case "--exercise-windows":
                 guard arguments.count == 2, let pid = Int32(arguments[1]), pid != getpid(),
                       NSRunningApplication(processIdentifier: pid)?.bundleIdentifier == "dev.logicscreen.app" else {
                     throw ScreenOperationError.unavailable("仅允许测试独立启动的 LogicScreen 验证窗口。")
                 }
                 let windows = WindowService()
+                let inventory = try await windows.inventory(displays: screens, pids: [pid])
                 let before = await windows.windowFrames(pid: pid)
                 guard let first = before.first,
                       let origin = WindowPlacement.owningDisplay(for: first, displays: screens),
@@ -40,11 +50,12 @@ struct LogicScreenProbe {
                 let moved = try await windows.gather(to: target, displays: screens, pids: [pid])
                 try await Task.sleep(for: .milliseconds(400))
                 let after = await windows.windowFrames(pid: pid)
+                let settled = await windows.settleMigration(to: target)
                 let restored = await windows.restore(displays: screens)
                 try await Task.sleep(for: .milliseconds(400))
                 let final = await windows.windowFrames(pid: pid)
                 let restoredAll = before.allSatisfy { expected in final.contains { approx($0, expected) } }
-                guard moved.moved > 0, moved.failed == 0,
+                guard !inventory.windows.isEmpty, moved.moved > 0, moved.failed == 0, settled.failed == 0,
                       after.contains(where: { $0.intersects(target.visibleFrame) }),
                       restored.failed == 0, restoredAll else {
                     throw ScreenOperationError.verificationFailed("窗口迁移或原位置恢复未通过验证。")
@@ -103,7 +114,7 @@ struct LogicScreenProbe {
                     throw error
                 }
             default:
-                throw ScreenOperationError.unavailable("支持 --diagnose、--exercise-windows PID、--exercise-main、--exercise-display ID。")
+                throw ScreenOperationError.unavailable("支持 --diagnose、--inventory、--exercise-windows PID、--exercise-main、--exercise-display ID。")
             }
         } catch {
             FileHandle.standardError.write(Data("FAIL: \(error.localizedDescription)\n".utf8))
