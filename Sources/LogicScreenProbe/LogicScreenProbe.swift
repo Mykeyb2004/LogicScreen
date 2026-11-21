@@ -66,16 +66,16 @@ struct LogicScreenProbe {
                     throw ScreenOperationError.unavailable("需要两块活动屏幕。")
                 }
                 do {
-                    try service.setMain(target.id)
+                    try await service.setMain(target.id)
                     try await Task.sleep(for: .milliseconds(800))
                     let succeeded = service.displays().contains { $0.id == target.id && $0.isMain }
-                    try service.restore(screens)
+                    try await service.restore(screens)
                     try await Task.sleep(for: .milliseconds(800))
                     guard succeeded, screens.filter(\.isActive).allSatisfy({ saved in
                         service.displays().contains { $0.id == saved.id && $0.isMain == saved.isMain && approx($0.frame, saved.frame) }
                     }) else { throw ScreenOperationError.verificationFailed("主屏切换或布局恢复未通过验证。") }
                     print("PASS: main display switched; original main display and layout restored.")
-                } catch { try? service.restore(screens); throw error }
+                } catch { try? await service.restore(screens); throw error }
             case "--exercise-display":
                 // This command is deliberately separate from normal diagnostics and requires an explicit ID.
                 guard arguments.count == 2, let id = UInt32(arguments[1]),
@@ -87,20 +87,22 @@ struct LogicScreenProbe {
                 let pids = NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular && !$0.isTerminated }
                     .map(\.processIdentifier)
                 guard let retained = screens.first(where: \.isMain) else { throw ScreenOperationError.lastDisplay }
+                let watchdog = DispatchWorkItem { _exit(124) }
+                defer { watchdog.cancel() }
                 do {
                     _ = try await ScreenShutdownSequence.perform(migrate: {
                         try await windows.gather(to: retained, displays: screens, pids: pids, sourceIDs: [target.id], strict: true)
                     }, verify: {
                         await windows.verifyVacated(sourceIDs: [target.id], displays: service.displays(), pids: pids)
                     }, disconnect: {
-                        DispatchQueue.global().asyncAfter(deadline: .now() + 30) { _exit(124) }
-                        try service.disconnect([target.id])
+                        DispatchQueue.global().asyncAfter(deadline: .now() + 30, execute: watchdog)
+                        try await service.disconnect([target.id])
                     })
                     try await Task.sleep(for: .seconds(2))
                     let inactive = !service.displays().contains { $0.id == target.id && $0.isActive }
-                    try service.restore(screens)
+                    try await service.restore(screens)
                     try await Task.sleep(for: .seconds(1))
-                    try service.restoreOrigins(screens)
+                    try await service.restoreOrigins(screens)
                     try await Task.sleep(for: .milliseconds(400))
                     let restoration = await windows.restore(displays: service.displays())
                     guard inactive, service.displays().contains(where: { $0.id == target.id && $0.isActive }) else {
@@ -108,7 +110,7 @@ struct LogicScreenProbe {
                     }
                     print("PASS: source windows migrated and verified before disconnection; secondary display reconnected; window restore failures=\(restoration.failed).")
                 } catch {
-                    try? service.restore(screens)
+                    try? await service.restore(screens)
                     try? await Task.sleep(for: .milliseconds(800))
                     _ = await windows.restore(displays: service.displays())
                     throw error

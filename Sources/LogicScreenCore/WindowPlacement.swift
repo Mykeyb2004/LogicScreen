@@ -24,6 +24,23 @@ public enum WindowPlacement {
         CGRect(x: rect.minX, y: mainDisplayHeight - rect.maxY, width: rect.width, height: rect.height)
     }
 
+    public static func quartzToAppKit(_ rect: CGRect, mainDisplayHeight: CGFloat) -> CGRect {
+        CGRect(x: rect.minX, y: mainDisplayHeight - rect.maxY, width: rect.width, height: rect.height)
+    }
+
+    public static func isPlaced(_ actual: CGRect, desired: CGRect, within bounds: CGRect,
+                                targetID: String? = nil, displays: [DisplayRecord]? = nil) -> Bool {
+        guard actual.intersects(bounds) else { return false }
+        if let targetID, let displays, owningDisplay(for: actual, displays: displays)?.id != targetID {
+            return false
+        }
+        let clampedX = max(bounds.minX, min(desired.minX, bounds.maxX - actual.width))
+        let clampedY = max(bounds.minY, min(desired.minY, bounds.maxY - actual.height))
+        let xMatches = abs(actual.minX - desired.minX) < 12 || abs(actual.minX - clampedX) < 12
+        let yMatches = abs(actual.minY - desired.minY) < 12 || abs(actual.minY - clampedY) < 12
+        return xMatches && yMatches
+    }
+
     private static func fraction(_ value: CGFloat, available: CGFloat) -> CGFloat {
         available > 0 ? min(1, max(0, value / available)) : 0
     }

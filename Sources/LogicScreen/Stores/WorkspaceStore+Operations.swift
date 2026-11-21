@@ -16,7 +16,7 @@ extension WorkspaceStore {
         guard let target = selected, target.isActive, !controlsLocked else { return }
         await perform {
             self.saveLayoutIfNeeded()
-            try self.displayService.setMain(target.id)
+            try await self.displayService.setMain(target.id)
             try await Task.sleep(for: .milliseconds(650))
             self.refresh()
             guard self.displays.contains(where: { $0.id == target.id && $0.isMain }) else {
@@ -30,6 +30,8 @@ extension WorkspaceStore {
         guard !isBusy, !isPreparing, remainingSeconds == nil else { return }
         self.plan = nil
         await perform {
+            await self.waitForSheetsToDismiss()
+            self.hideLabels()
             self.refresh()
             guard let target = self.displays.first(where: { $0.id == plan.target.id && $0.isActive }),
                   !plan.sourceIDs.contains(target.id) else { throw ScreenOperationError.missingDisplay }
@@ -42,8 +44,12 @@ extension WorkspaceStore {
                 let report = try await ScreenShutdownSequence.perform(migrate: {
                     self.phase = .moving
                     self.status = "正在将窗口移到 \(target.name)，所有屏幕仍保持开启…"
-                    return try await self.windowService.gather(to: target, displays: self.displays,
-                                                               pids: self.applicationPIDs, sourceIDs: ids, strict: true)
+                    let migrated = try await self.windowService.gather(to: target, displays: self.displays,
+                                                                       pids: self.applicationPIDs, sourceIDs: ids, strict: true)
+                    if migrated.moved > 0 {
+                        try? await Task.sleep(for: .milliseconds(80))
+                    }
+                    return migrated
                 }, verify: {
                     self.phase = .verifying
                     self.status = "正在重新检查待停用屏幕，确认窗口已迁移…"
@@ -54,7 +60,7 @@ extension WorkspaceStore {
                     self.phase = .switching
                     self.status = "窗口迁移已确认，正在停用屏幕…"
                     attemptedSwitch = true
-                    try self.displayService.disconnect(ids)
+                    try await self.displayService.disconnect(ids)
                     self.focusedDisplayID = target.id
                     // Start protection before any fallible post-switch work.
                     self.beginCountdown()
@@ -93,7 +99,7 @@ extension WorkspaceStore {
     func reconnectSelected() async {
         guard let target = selected, !target.isActive, !controlsLocked else { return }
         await perform {
-            try self.displayService.reconnect(target)
+            try await self.displayService.reconnect(target)
             try await Task.sleep(for: .milliseconds(800))
             self.refresh()
             guard self.displays.contains(where: { $0.id == target.id && $0.isActive }) else {
@@ -128,10 +134,10 @@ extension WorkspaceStore {
     @discardableResult
     private func restoreSavedWorkspace() async throws -> MigrationReport {
         if let snapshot {
-            try displayService.restore(snapshot)
+            try await displayService.restore(snapshot)
             try await Task.sleep(for: .milliseconds(800))
             refresh()
-            try displayService.restoreOrigins(snapshot)
+            try await displayService.restoreOrigins(snapshot)
             try await Task.sleep(for: .milliseconds(400))
             refresh()
             let missing = snapshot.filter(\.isActive).filter { saved in

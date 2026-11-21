@@ -52,7 +52,10 @@ struct MigrationSheet: View {
                 }.disabled(store.isPreparing)
                 if store.isPreparing { ProgressView().controlSize(.small) }
                 Spacer()
-                Button("迁移窗口并停用屏幕") { Task { await store.focus(using: plan) } }
+                Button("迁移窗口并停用屏幕") {
+                    dismiss()
+                    Task { await store.focus(using: plan) }
+                }
                     .buttonStyle(.borderedProminent)
                     .disabled(!plan.readiness.canProceed || store.isPreparing)
                     .keyboardShortcut(.defaultAction)

@@ -38,8 +38,10 @@ final class PlacementTests: XCTestCase {
     }
 
     func testAppKitCoordinateConversionHandlesScreenAboveMain() {
-        let converted = WindowPlacement.appKitToQuartz(CGRect(x: -100, y: 1200, width: 800, height: 600), mainDisplayHeight: 1152)
+        let appKit = CGRect(x: -100, y: 1200, width: 800, height: 600)
+        let converted = WindowPlacement.appKitToQuartz(appKit, mainDisplayHeight: 1152)
         XCTAssertEqual(converted, CGRect(x: -100, y: -648, width: 800, height: 600))
+        XCTAssertEqual(WindowPlacement.quartzToAppKit(converted, mainDisplayHeight: 1152), appKit)
     }
 
     func testWindowOnBoundaryBelongsToScreenWithLargestIntersection() {
@@ -69,6 +71,25 @@ final class PlacementTests: XCTestCase {
         let original = display("stable-uuid", frame: CGRect(x: -1920, y: -1080, width: 1920, height: 1080))
         let data = try JSONEncoder().encode(original)
         XCTAssertEqual(try JSONDecoder().decode(DisplayRecord.self, from: data), original)
+    }
+
+    func testPlacementAcceptsCharacterGridSnappedWindowClampedToTargetEdge() {
+        let source = display("b", frame: CGRect(x: -1920, y: 0, width: 1920, height: 1080))
+        let target = display("a", frame: CGRect(x: 0, y: 0, width: 1280, height: 800))
+        let desired = CGRect(x: 480, y: 200, width: 800, height: 600)
+        // Terminal or min-size window snaps 24pt wider/taller, so macOS clamps origin to (456, 176) to keep it on target.
+        let actual = CGRect(x: 456, y: 176, width: 824, height: 624)
+        XCTAssertTrue(WindowPlacement.isPlaced(actual, desired: desired, within: target.visibleFrame,
+                                               targetID: target.id, displays: [target, source]))
+    }
+
+    func testPlacementRejectsWindowStillOwnedBySourceDisplay() {
+        let source = display("b", frame: CGRect(x: -1920, y: 0, width: 1920, height: 1080))
+        let target = display("a", frame: CGRect(x: 0, y: 0, width: 1280, height: 800))
+        let desired = CGRect(x: 0, y: 100, width: 800, height: 600)
+        let stuckmostlyOnSource = CGRect(x: -700, y: 100, width: 800, height: 600)
+        XCTAssertFalse(WindowPlacement.isPlaced(stuckmostlyOnSource, desired: desired, within: target.visibleFrame,
+                                                targetID: target.id, displays: [target, source]))
     }
 
     private func display(_ id: String, frame: CGRect = CGRect(x: 0, y: 0, width: 1920, height: 1080)) -> DisplayRecord {

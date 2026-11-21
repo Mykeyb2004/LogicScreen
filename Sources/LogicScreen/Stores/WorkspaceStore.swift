@@ -63,6 +63,7 @@ final class WorkspaceStore {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(2))
                 guard !Task.isCancelled, let self else { return }
+                guard !self.isBusy, !self.isPreparing else { continue }
                 let wasTrusted = self.isTrusted
                 self.refresh()
                 tick += 1
@@ -87,7 +88,7 @@ final class WorkspaceStore {
     }
 
     func reloadWindows() async {
-        guard !isBusy, !isLoadingWindows else { return }
+        guard !isBusy, !isPreparing, !isLoadingWindows else { return }
         refresh()
         guard isTrusted else { inventory = nil; return }
         isLoadingWindows = true
@@ -96,7 +97,7 @@ final class WorkspaceStore {
         do {
             let result = try await windowService.inventory(displays: geometry, pids: applicationPIDs)
             // An old desktop snapshot must never replace a result for the new layout.
-            guard geometry == displays, !isBusy else { return }
+            guard geometry == displays, !isBusy, !isPreparing else { return }
             inventory = result
             inventoryError = nil
         } catch { inventoryError = error.localizedDescription }
@@ -125,6 +126,15 @@ final class WorkspaceStore {
 
     func windowCount(on id: String) -> Int? { inventory.map { $0.windows.filter { $0.displayID == id }.count } }
     func showLabels() { labels.show() }
+    func hideLabels() { labels.dismiss() }
+
+    func waitForSheetsToDismiss() async {
+        await Task.yield()
+        for _ in 0..<30 {
+            guard NSApp?.windows.contains(where: { $0.attachedSheet != nil }) == true else { return }
+            try? await Task.sleep(for: .milliseconds(25))
+        }
+    }
 
     func requestPermission() {
         let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
@@ -192,8 +202,9 @@ final class WorkspaceStore {
     }
 
     private func screenConfigurationChanged() {
+        guard !isBusy, !isPreparing else { return }
         refresh()
-        guard !isBusy, let focusedDisplayID,
+        guard let focusedDisplayID,
               !displays.contains(where: { $0.id == focusedDisplayID && $0.isActive }) else { return }
         Task { await restore() }
     }

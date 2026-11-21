@@ -35,7 +35,7 @@ final class ScreenLabels {
         }
     }
 
-    private func dismiss() {
+    func dismiss() {
         dismissTask?.cancel()
         panels.forEach { $0.orderOut(nil) }
         panels.removeAll()

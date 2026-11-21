@@ -29,7 +29,7 @@ public struct MigrationReport: Sendable {
 public enum ScreenShutdownSequence {
     public static func perform(migrate: () async throws -> MigrationReport,
                                verify: () async throws -> Bool,
-                               disconnect: () throws -> Void) async throws -> MigrationReport {
+                               disconnect: () async throws -> Void) async throws -> MigrationReport {
         let report = try await migrate()
         guard report.failed == 0, report.blocked == 0, report.unreadableApplications == 0 else {
             throw ScreenOperationError.verificationFailed(report.message + "屏幕保持开启。")
@@ -37,7 +37,7 @@ public enum ScreenShutdownSequence {
         guard try await verify() else {
             throw ScreenOperationError.verificationFailed("待停用屏幕上仍有窗口，或窗口状态发生变化。屏幕保持开启，请重试。")
         }
-        try disconnect()
+        try await disconnect()
         return report
     }
 }

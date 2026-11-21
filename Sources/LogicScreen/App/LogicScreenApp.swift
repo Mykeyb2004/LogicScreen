@@ -48,7 +48,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard let store else { return .terminateNow }
-        guard !store.isBusy else {
+        guard !store.isBusy, !store.isPreparing else {
             NSApp.activate(ignoringOtherApps: true)
             return .terminateCancel
         }
